@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env
+.env*.local
+!.env.example
+*.md
+!README.md
+.cursor
+.playwright
+test-results
+playwright-report
