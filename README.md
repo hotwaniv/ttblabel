@@ -14,7 +14,7 @@ cp .env.example .env.local
 Add your Anthropic API key to `.env.local`:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-.
 ```
 
 Database and auth variables are already configured in `.env.example` — copy them as-is if setting up a fresh environment.
