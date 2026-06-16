@@ -22,9 +22,9 @@ export function VerifyShell() {
             Alcohol label verification
           </h1>
           <p className="max-w-2xl text-muted-foreground leading-relaxed">
-            Upload a single label image or a ZIP batch, enter your COLA
-            application fields, and compare extracted label text against your
-            submission — including the mandatory government warning.
+            Upload a single label image with your COLA application fields, or a
+            ZIP batch with an optional expected-values spreadsheet — matched per
+            image by COLA/TTB ID and compared with fuzzy matching.
           </p>
         </div>
 

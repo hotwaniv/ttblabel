@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
+  EXPECTED_SHEET_MIME_TYPES,
   IMAGE_MIME_TYPES,
+  MAX_EXPECTED_SHEET_BYTES,
   MAX_IMAGE_BYTES,
   MAX_ZIP_BYTES,
 } from "@/lib/verify/constants";
@@ -25,7 +27,7 @@ export const verifyRequestSchema = applicationFieldsSchema.extend({
 
 export type VerifyRequest = z.infer<typeof verifyRequestSchema>;
 
-export const batchVerifyRequestSchema = applicationFieldsSchema.extend({
+export const batchVerifyRequestSchema = z.object({
   archive: z
     .instanceof(Blob)
     .refine((file) => file.size <= MAX_ZIP_BYTES, {
@@ -41,6 +43,23 @@ export const batchVerifyRequestSchema = applicationFieldsSchema.extend({
 
       return file instanceof File && file.name.toLowerCase().endsWith(".zip");
     }, { message: "Upload must be a ZIP archive" }),
+  expectedSheet: z
+    .instanceof(Blob)
+    .refine((file) => file.size <= MAX_EXPECTED_SHEET_BYTES, {
+      message: "Expected-values spreadsheet must be less than 5MB",
+    })
+    .refine((file) => {
+      if (
+        EXPECTED_SHEET_MIME_TYPES.includes(
+          file.type as (typeof EXPECTED_SHEET_MIME_TYPES)[number]
+        )
+      ) {
+        return true;
+      }
+
+      return file instanceof File && file.name.toLowerCase().endsWith(".xlsx");
+    }, { message: "Expected-values upload must be an .xlsx spreadsheet" })
+    .optional(),
 });
 
 export type BatchVerifyRequest = z.infer<typeof batchVerifyRequestSchema>;
@@ -71,6 +90,7 @@ export function parseVerifyFormData(formData: FormData) {
 
 export function parseBatchVerifyFormData(formData: FormData) {
   const archive = formData.get("archive");
+  const expectedSheet = formData.get("expectedSheet");
 
   if (!(archive instanceof Blob) || archive.size === 0) {
     throw new Error("A ZIP archive is required");
@@ -78,6 +98,9 @@ export function parseBatchVerifyFormData(formData: FormData) {
 
   return batchVerifyRequestSchema.parse({
     archive,
-    ...readApplicationFields(formData),
+    expectedSheet:
+      expectedSheet instanceof Blob && expectedSheet.size > 0
+        ? expectedSheet
+        : undefined,
   });
 }

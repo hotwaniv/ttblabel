@@ -14,6 +14,7 @@ import {
   aiVerificationSchema,
   type AiFieldExtraction,
   type ApplicationFields,
+  type VerifiableFieldKey,
   type VerificationResult,
   type VerifyResponse,
 } from "./types";
@@ -23,6 +24,7 @@ const log = createLogger("verify-label");
 export type VerifyLabelOptions = {
   mimeType?: string | null;
   filename?: string;
+  useJudge?: boolean;
   onFieldComplete?: (field: VerificationResult) => void | Promise<void>;
 };
 
@@ -30,7 +32,7 @@ export type VerifyLabelResponse = VerifyResponse & {
   processingTimeMs: number;
 };
 
-function isCompleteAiField(f: unknown): f is AiFieldExtraction {
+function isStreamableAiField(f: unknown): f is AiFieldExtraction {
   if (!f || typeof f !== "object") return false;
   const obj = f as Record<string, unknown>;
   return (
@@ -38,9 +40,27 @@ function isCompleteAiField(f: unknown): f is AiFieldExtraction {
     typeof obj.status === "string" &&
     typeof obj.confidence === "number" &&
     typeof obj.explanation === "string" &&
-    obj.explanation.length > 0 &&
     "extracted" in obj
   );
+}
+
+async function toVerificationResult(
+  f: AiFieldExtraction,
+  expectedValues: Record<VerificationResult["field"], string>,
+  options?: VerifyLabelOptions
+): Promise<VerificationResult> {
+  const merged: VerificationResult = {
+    field: f.field,
+    status: f.status,
+    extracted: f.extracted,
+    expected: expectedValues[f.field] ?? "",
+    confidence: f.confidence,
+    explanation: f.explanation,
+  };
+  const [refined] = await refineVerificationResults([merged], {
+    useJudge: options?.useJudge,
+  });
+  return refined;
 }
 
 export async function verifyLabelImage(
@@ -56,6 +76,7 @@ export async function verifyLabelImage(
     imageSizeBytes: imageBuffer.length,
     brandName: fields.brandName,
     beverageType: fields.beverageType,
+    useJudge: options?.useJudge ?? false,
   });
 
   const { buffer, mimeType } = await preprocessLabelImage(
@@ -84,56 +105,49 @@ export async function verifyLabelImage(
   });
 
   const expectedValues = buildExpectedValues(fields);
-  const results: VerificationResult[] = [];
+  const streamedFields = new Set<VerifiableFieldKey>();
   const seenIndices = new Set<number>();
 
   for await (const partial of partialObjectStream) {
     if (!partial.fields) continue;
-    for (let i = 0; i < partial.fields.length; i++) {
+
+    for (let i = 0; i < partial.fields.length - 1; i++) {
       if (seenIndices.has(i)) continue;
       const f = partial.fields[i];
-      if (isCompleteAiField(f)) {
-        seenIndices.add(i);
-        const merged: VerificationResult = {
-          field: f.field,
-          status: f.status,
-          extracted: f.extracted,
-          expected: expectedValues[f.field] ?? "",
-          confidence: f.confidence,
-          explanation: f.explanation,
-        };
-        const [refined] = refineVerificationResults([merged]);
-        results.push(refined);
+      if (!isStreamableAiField(f)) continue;
 
-        log.debug("field complete", {
-          filename,
-          field: refined.field,
-          status: refined.status,
-          confidence: refined.confidence,
-          extracted: refined.extracted,
-        });
+      seenIndices.add(i);
+      const refined = await toVerificationResult(f, expectedValues, options);
+      streamedFields.add(refined.field);
 
-        await options?.onFieldComplete?.(refined);
-      }
-    }
-  }
-
-  // Fill in any fields the AI omitted
-  const aiResult = await finalObject;
-  const allMerged = mergeVerificationResults(aiResult, fields);
-  for (const item of allMerged) {
-    if (!results.some((r) => r.field === item.field)) {
-      const [refined] = refineVerificationResults([item]);
-      results.push(refined);
-
-      log.debug("field filled (ai omitted)", {
+      log.debug("field complete", {
         filename,
         field: refined.field,
         status: refined.status,
+        confidence: refined.confidence,
+        extracted: refined.extracted,
       });
 
       await options?.onFieldComplete?.(refined);
     }
+  }
+
+  const aiResult = await finalObject;
+  const results = await refineVerificationResults(
+    mergeVerificationResults(aiResult, fields),
+    { useJudge: options?.useJudge }
+  );
+
+  for (const item of results) {
+    if (streamedFields.has(item.field)) continue;
+
+    log.debug("field filled (stream tail or ai omitted)", {
+      filename,
+      field: item.field,
+      status: item.status,
+    });
+
+    await options?.onFieldComplete?.(item);
   }
 
   const overall = computeOverallResult(results);

@@ -4,7 +4,6 @@ import { RefreshCwIcon, UploadIcon } from "lucide-react";
 import { type DragEvent, type FormEvent, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  APPLICATION_FORM_FIELDS,
   appendApplicationFields,
   ApplicationFieldsSection,
   type ApplicationFormFieldId,
@@ -44,16 +43,6 @@ function mapPrefillToForm(
     producerName: prefilled.producerName ?? "",
     beverageType: BEVERAGE_TYPE_LABELS[prefilled.beverageType],
   };
-}
-
-const REQUIRED_FIELDS: ApplicationFormFieldId[] = APPLICATION_FORM_FIELDS.filter(
-  (f) => f.priority !== "optional"
-).map((f) => f.id);
-
-function isFormComplete(
-  values: Record<ApplicationFormFieldId, string>
-): boolean {
-  return REQUIRED_FIELDS.every((id) => values[id].trim().length > 0);
 }
 
 export function VerifyForm() {
@@ -177,11 +166,6 @@ export function VerifyForm() {
   // ── submission ───────────────────────────────────────────────────────────
 
   const submitVerification = async (currentFile: File) => {
-    if (!isFormComplete(formValues)) {
-      toast.error("Please complete all application fields");
-      return;
-    }
-
     setIsSubmitting(true);
     resetResults();
 
@@ -197,6 +181,7 @@ export function VerifyForm() {
         },
         onComplete: (result) => {
           setResponse(result);
+          setStreamedFields(result.results);
         },
         onError: (message) => {
           throw new Error(message);
@@ -249,12 +234,16 @@ export function VerifyForm() {
     prefillConfidence !== null &&
     prefillConfidence < PREFILL_LOW_CONFIDENCE_THRESHOLD;
 
-  const canSubmit =
-    Boolean(imageFile) && isFormComplete(formValues) && !isSubmitting;
+  const canSubmit = Boolean(imageFile) && !isSubmitting;
 
   return (
     <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
-      <form className="space-y-4" onSubmit={handleSubmit} ref={formRef}>
+      <form
+        className="space-y-4"
+        noValidate
+        onSubmit={handleSubmit}
+        ref={formRef}
+      >
         <section className="rounded-xl border border-border bg-card p-6">
           <h2 className="mb-4 font-medium text-lg">Label image</h2>
 

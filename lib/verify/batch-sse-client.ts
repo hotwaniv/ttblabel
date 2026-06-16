@@ -1,7 +1,12 @@
-import type { BatchItemResult, BatchVerifyResponse } from "./types";
+import type {
+  BatchFieldEvent,
+  BatchItemResult,
+  BatchVerifyResponse,
+} from "./types";
 
 export type BatchStreamHandlers = {
-  onStart: (total: number) => void;
+  onStart: (total: number, filenames: string[]) => void;
+  onField: (field: BatchFieldEvent) => void;
   onItem: (item: BatchItemResult) => void;
   onComplete: (response: BatchVerifyResponse) => void;
   onError: (message: string) => void;
@@ -33,7 +38,10 @@ function parseSseChunk(
     const payload = JSON.parse(dataLine) as unknown;
 
     if (eventName === "start") {
-      handlers.onStart((payload as { total: number }).total);
+      const startPayload = payload as { total: number; filenames?: string[] };
+      handlers.onStart(startPayload.total, startPayload.filenames ?? []);
+    } else if (eventName === "field") {
+      handlers.onField(payload as BatchFieldEvent);
     } else if (eventName === "item") {
       handlers.onItem(payload as BatchItemResult);
     } else if (eventName === "complete") {

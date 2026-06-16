@@ -1,12 +1,12 @@
 import { z } from "zod";
 
 export const applicationFieldsSchema = z.object({
-  brandName: z.string().min(1, "Brand name is required"),
-  classType: z.string().min(1, "Class/type is required"),
-  alcoholContent: z.string().min(1, "Alcohol content is required"),
-  netContents: z.string().min(1, "Net contents is required"),
-  producerName: z.string().min(1, "Producer name is required"),
-  beverageType: z.string().optional().default(""),
+  brandName: z.string().default(""),
+  classType: z.string().default(""),
+  alcoholContent: z.string().default(""),
+  netContents: z.string().default(""),
+  producerName: z.string().default(""),
+  beverageType: z.string().default(""),
 });
 
 export type ApplicationFields = z.infer<typeof applicationFieldsSchema>;
@@ -111,6 +111,10 @@ export const batchVerifyResponseSchema = z.object({
 });
 
 export type BatchVerifyResponse = z.infer<typeof batchVerifyResponseSchema>;
+
+export type BatchFieldEvent = VerificationResult & {
+  filename: string;
+};
 
 // Client-side override types — not persisted server-side
 export type FieldOverride = {

@@ -4,12 +4,13 @@ import {
   extractImagesFromZip,
   runBatchVerification,
 } from "@/lib/verify/batch";
+import {
+  buildRowLookup,
+  parseExpectedSheetRows,
+  type ExpectedRow,
+} from "@/lib/verify/expected-sheet";
 import { createLogger } from "@/lib/verify/logger";
-import type {
-  ApplicationFields,
-  BatchItemResult,
-  BatchVerifyResponse,
-} from "@/lib/verify/types";
+import type { BatchItemResult, BatchVerifyResponse } from "@/lib/verify/types";
 import { parseBatchVerifyFormData } from "../schema";
 
 export const maxDuration = 300;
@@ -32,18 +33,55 @@ export async function POST(request: Request) {
 
   try {
     const formData = await request.formData();
-    const { archive, ...fields } = parseBatchVerifyFormData(formData);
-    const applicationFields = fields as ApplicationFields;
+    const { archive, expectedSheet } = parseBatchVerifyFormData(formData);
 
     const zipBuffer = Buffer.from(await archive.arrayBuffer());
     const images = await extractImagesFromZip(zipBuffer);
+
+    let expectedRows: ExpectedRow[] | undefined;
+    let rowLookup: ReturnType<typeof buildRowLookup> | undefined;
+
+    if (expectedSheet) {
+      const parseStart = Date.now();
+
+      try {
+        const sheetBuffer = Buffer.from(await expectedSheet.arrayBuffer());
+        expectedRows = await parseExpectedSheetRows(sheetBuffer);
+        rowLookup = buildRowLookup(expectedRows);
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Could not read spreadsheet — check it has the expected columns";
+
+        log.warn("expected sheet parse failed", { requestId, error: message });
+        return Response.json(
+          {
+            error:
+              message.startsWith("Spreadsheet") ||
+              message.startsWith("No usable")
+                ? message
+                : "Could not read spreadsheet — check it has the expected columns",
+          },
+          { status: 400 }
+        );
+      }
+
+      const parseTimeMs = Date.now() - parseStart;
+      log.info("expected sheet parsed", {
+        requestId,
+        rowCount: expectedRows.length,
+        parseTimeMs,
+      });
+    }
 
     log.info("batch started", {
       requestId,
       userId: session.user.id,
       imageCount: images.length,
       zipSizeBytes: zipBuffer.byteLength,
-      brandName: applicationFields.brandName,
+      expectedSheetAttached: Boolean(expectedRows),
+      expectedRowCount: expectedRows?.length ?? 0,
     });
 
     const encoder = new TextEncoder();
@@ -53,14 +91,21 @@ export async function POST(request: Request) {
           controller.enqueue(encoder.encode(sseEncode(event, data)));
         };
 
-        // Tell the client how many images to expect upfront
-        send("start", { total: images.length });
+        send("start", {
+          total: images.length,
+          filenames: images.map((image) => image.filename),
+        });
 
         try {
           let completedCount = 0;
           const items: BatchItemResult[] = [];
 
-          await runBatchVerification(images, applicationFields, {
+          await runBatchVerification(images, {
+            expectedRows,
+            rowLookup,
+            onFieldComplete: (filename, field) => {
+              send("field", { filename, ...field });
+            },
             onItemComplete: (item) => {
               completedCount++;
               items.push(item);

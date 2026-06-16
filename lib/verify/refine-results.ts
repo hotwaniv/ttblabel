@@ -1,4 +1,9 @@
-import { LOW_CONFIDENCE_THRESHOLD } from "./constants";
+import {
+  FUZZY_TEXT_FIELDS,
+  JUDGE_SIMILARITY_HIGH,
+  JUDGE_SIMILARITY_LOW,
+  LOW_CONFIDENCE_THRESHOLD,
+} from "./constants";
 import { GOVERNMENT_WARNING_TEXT } from "./government-warning";
 import {
   normalizeForComparison,
@@ -6,6 +11,7 @@ import {
   statusFromSimilarity,
   stricterStatus,
 } from "./fuzzy-match";
+import { judgeBorderlineFieldStatus } from "./judge-match";
 import type { FieldStatus, VerificationResult } from "./types";
 
 const WARNING_PREGNANCY =
@@ -13,6 +19,10 @@ const WARNING_PREGNANCY =
 const WARNING_BIRTH_DEFECTS = "birth defects";
 const WARNING_IMPAIRS = "impairs your ability to drive";
 const WARNING_MACHINERY = "machinery";
+
+export type RefineOptions = {
+  useJudge?: boolean;
+};
 
 function parseAbv(value: string): number | null {
   const percentMatch = value.match(/(\d+(?:\.\d+)?)\s*%\s*(?:alc|abv|vol)?/i);
@@ -162,18 +172,40 @@ function refineGovernmentWarning(extracted: string | null): FieldStatus {
   return "fail";
 }
 
-function refineFuzzyTextField(
+function isFuzzyTextField(
+  field: VerificationResult["field"]
+): field is (typeof FUZZY_TEXT_FIELDS)[number] {
+  return FUZZY_TEXT_FIELDS.includes(field as (typeof FUZZY_TEXT_FIELDS)[number]);
+}
+
+async function refineFuzzyTextField(
+  field: VerificationResult["field"],
   extracted: string | null,
-  expected: string
-): FieldStatus {
+  expected: string,
+  options?: RefineOptions
+): Promise<FieldStatus> {
   if (!extracted) {
     return "absent";
   }
 
-  return statusFromSimilarity(similarityRatio(extracted, expected));
+  const ratio = similarityRatio(extracted, expected);
+
+  if (
+    !options?.useJudge ||
+    !isFuzzyTextField(field) ||
+    ratio < JUDGE_SIMILARITY_LOW ||
+    ratio >= JUDGE_SIMILARITY_HIGH
+  ) {
+    return statusFromSimilarity(ratio);
+  }
+
+  return judgeBorderlineFieldStatus(field, extracted, expected, ratio);
 }
 
-function refineFieldStatus(result: VerificationResult): FieldStatus {
+async function refineFieldStatus(
+  result: VerificationResult,
+  options?: RefineOptions
+): Promise<FieldStatus> {
   if (result.confidence < LOW_CONFIDENCE_THRESHOLD && result.extracted) {
     return stricterStatus(result.status, "review");
   }
@@ -198,7 +230,12 @@ function refineFieldStatus(result: VerificationResult): FieldStatus {
     case "classType":
     case "producerName":
     case "beverageType":
-      ruleStatus = refineFuzzyTextField(result.extracted, result.expected);
+      ruleStatus = await refineFuzzyTextField(
+        result.field,
+        result.extracted,
+        result.expected,
+        options
+      );
       break;
     default: {
       const exhaustiveCheck: never = result.field;
@@ -209,20 +246,26 @@ function refineFieldStatus(result: VerificationResult): FieldStatus {
   return stricterStatus(result.status, ruleStatus);
 }
 
-export function refineVerificationResults(
-  results: VerificationResult[]
-): VerificationResult[] {
-  return results.map((result) => {
-    const status = refineFieldStatus(result);
+export async function refineVerificationResults(
+  results: VerificationResult[],
+  options?: RefineOptions
+): Promise<VerificationResult[]> {
+  const refined: VerificationResult[] = [];
+
+  for (const result of results) {
+    const status = await refineFieldStatus(result, options);
 
     if (status === result.status) {
-      return result;
+      refined.push(result);
+      continue;
     }
 
-    return {
+    refined.push({
       ...result,
       status,
       explanation: `${result.explanation} Server-side rule check adjusted status to "${status}".`,
-    };
-  });
+    });
+  }
+
+  return refined;
 }

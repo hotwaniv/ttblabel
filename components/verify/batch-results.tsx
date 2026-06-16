@@ -4,15 +4,21 @@ import { DownloadIcon } from "lucide-react";
 import { useState } from "react";
 import {
   FIELD_LABELS,
+  FIELD_ORDER,
   type BatchItemResult,
   type BatchVerifyResponse,
   type OverrideMap,
+  type VerificationResult,
 } from "@/lib/verify/types";
+import type { ClientZipImage } from "@/lib/verify/zip-client";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { ExportJsonButton } from "@/components/verify/export-json-button";
 import { VerificationResults } from "@/components/verify/verification-results";
-import { OverallResultBadge } from "@/components/verify/status-badge";
+import {
+  FieldStatusBadge,
+  OverallResultBadge,
+} from "@/components/verify/status-badge";
 import { cn } from "@/lib/utils";
 
 function exportBatchCsv(
@@ -113,7 +119,6 @@ function SmartSummaryCard({
             {response.completed} of {response.total} labels processed
           </p>
 
-          {/* Progress bar while processing */}
           {isProcessing && response.total > 0 ? (
             <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <div
@@ -191,52 +196,139 @@ function SmartSummaryCard({
   );
 }
 
-function BatchItemCard({
+function StreamingFieldRow({ result }: { result: VerificationResult }) {
+  const extracted = result.extracted ?? "Not detected";
+  const isLongText = extracted.length > 80;
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-muted/20 px-3 py-2 animate-in fade-in slide-in-from-bottom-1 duration-300">
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 font-medium text-sm">{FIELD_LABELS[result.field]}</p>
+        <FieldStatusBadge className="shrink-0" status={result.status} />
+      </div>
+      <p
+        className={cn(
+          "mt-1 break-words text-muted-foreground text-xs leading-relaxed",
+          isLongText && "line-clamp-3"
+        )}
+        title={isLongText ? extracted : undefined}
+      >
+        {extracted}
+      </p>
+    </div>
+  );
+}
+
+function BatchImageRow({
+  image,
   item,
+  streamedFields,
+  isProcessing,
   overrides,
   onOverridesChange,
 }: {
-  item: BatchItemResult;
+  image: ClientZipImage;
+  item: BatchItemResult | null;
+  streamedFields: VerificationResult[];
+  isProcessing: boolean;
   overrides: OverrideMap;
   onOverridesChange: (overrides: OverrideMap) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const fields = item?.results ?? streamedFields;
+  const isQueued = isProcessing && fields.length === 0 && !item;
+  const isStreaming = isProcessing && !item && fields.length > 0;
 
   return (
-    <div className="rounded-xl border border-border bg-card">
-      <button
-        className="flex w-full items-center justify-between gap-3 p-4 text-left"
-        onClick={() => setExpanded((current) => !current)}
-        type="button"
-      >
-        <div className="min-w-0">
-          <p className="truncate font-medium">{item.filename}</p>
-          {item.error ? (
-            <p className="mt-1 text-destructive text-sm">{item.error}</p>
+    <div className="overflow-hidden rounded-xl border border-border bg-card p-4">
+      <div className="grid gap-4 lg:grid-cols-[160px_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-2">
+          <div className="overflow-hidden rounded-lg border border-border bg-muted/20">
+            <img
+              alt={image.filename}
+              className="aspect-square w-full object-contain"
+              src={image.previewUrl}
+            />
+          </div>
+          <p className="truncate font-medium text-xs" title={image.filename}>
+            {image.filename}
+          </p>
+        </div>
+
+        <div className="min-w-0 space-y-3 overflow-hidden">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              {item?.error ? (
+                <p className="text-destructive text-sm">{item.error}</p>
+              ) : isQueued ? (
+                <p className="text-muted-foreground text-sm">Waiting to verify…</p>
+              ) : isStreaming ? (
+                <p className="inline-flex items-center gap-2 text-muted-foreground text-sm">
+                  <Spinner className="size-3.5" />
+                  Verifying…
+                </p>
+              ) : item ? (
+                <p className="text-muted-foreground text-sm">
+                  {fields.length} field{fields.length === 1 ? "" : "s"} verified
+                </p>
+              ) : (
+                <p className="text-muted-foreground text-sm">Ready to verify</p>
+              )}
+            </div>
+
+            {item && !item.error ? (
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <OverallResultBadge result={item.overall} />
+                <Button
+                  onClick={() => setExpanded((current) => !current)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {expanded ? "Hide details" : "View details"}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+
+          {fields.length > 0 && !expanded ? (
+            <div className="grid min-w-0 gap-2">
+              {FIELD_ORDER.map((fieldKey) => {
+                const result = fields.find((field) => field.field === fieldKey);
+                if (!result) {
+                  return null;
+                }
+
+                return <StreamingFieldRow key={fieldKey} result={result} />;
+              })}
+            </div>
+          ) : null}
+
+          {expanded && item && !item.error ? (
+            <VerificationResults
+              className="space-y-4"
+              onOverridesChange={onOverridesChange}
+              response={item}
+            />
           ) : null}
         </div>
-        <OverallResultBadge result={item.overall} />
-      </button>
-
-      {expanded && !item.error ? (
-        <div className="border-t border-border p-4">
-          <VerificationResults
-            className="space-y-4"
-            onOverridesChange={onOverridesChange}
-            response={item}
-          />
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
 
 export function BatchResults({
+  archiveImages,
+  completedItems,
+  streamedFieldsByFile,
   response,
   isProcessing = false,
   className,
 }: {
-  response: BatchVerifyResponse;
+  archiveImages: ClientZipImage[];
+  completedItems: Record<string, BatchItemResult>;
+  streamedFieldsByFile: Record<string, VerificationResult[]>;
+  response: BatchVerifyResponse | null;
   isProcessing?: boolean;
   className?: string;
 }) {
@@ -250,48 +342,56 @@ export function BatchResults({
     };
 
   return (
-    <section className={cn("space-y-6", className)}>
-      <div className="flex flex-wrap items-start gap-3">
-        <SmartSummaryCard isProcessing={isProcessing} response={response} />
+    <section className={cn("min-w-0 space-y-6", className)}>
+      {response ? (
+        <div className="flex flex-wrap items-start gap-3">
+          <SmartSummaryCard isProcessing={isProcessing} response={response} />
 
-        {!isProcessing ? (
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-start">
-            <ExportJsonButton
-              data={response}
-              filename="ttb-batch-verification.json"
-            />
-            <Button
-              onClick={() => exportBatchCsv(response, overridesPerFile)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <DownloadIcon aria-hidden="true" />
-              Export CSV
-            </Button>
-          </div>
-        ) : null}
-      </div>
-
-      {response.items.length > 0 ? (
-        <div className="grid gap-3">
-          {response.items.map((item) => (
-            <BatchItemCard
-              item={item}
-              key={item.filename}
-              onOverridesChange={handleOverridesChange(item.filename)}
-              overrides={overridesPerFile[item.filename] ?? {}}
-            />
-          ))}
-
-          {isProcessing ? (
-            <div className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-muted/10 p-4 text-muted-foreground text-sm">
-              <Spinner className="size-4 shrink-0" />
-              Verifying remaining labels…
+          {!isProcessing ? (
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-start">
+              <ExportJsonButton
+                data={response}
+                filename="ttb-batch-verification.json"
+              />
+              <Button
+                onClick={() => exportBatchCsv(response, overridesPerFile)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <DownloadIcon aria-hidden="true" />
+                Export CSV
+              </Button>
             </div>
           ) : null}
         </div>
       ) : null}
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-medium text-lg">Label images</h2>
+            <p className="text-muted-foreground text-sm">
+              {archiveImages.length} image{archiveImages.length === 1 ? "" : "s"}{" "}
+              in archive
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3">
+          {archiveImages.map((image) => (
+            <BatchImageRow
+              image={image}
+              isProcessing={isProcessing}
+              item={completedItems[image.filename] ?? null}
+              key={image.filename}
+              onOverridesChange={handleOverridesChange(image.filename)}
+              overrides={overridesPerFile[image.filename] ?? {}}
+              streamedFields={streamedFieldsByFile[image.filename] ?? []}
+            />
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
