@@ -2,40 +2,37 @@
 
 Prototype tool for comparing alcohol beverage label artwork against COLA application fields. Upload a label image (or a ZIP of many labels), enter the expected application values, and Claude Vision extracts each statement from the label and scores it field-by-field — including the mandatory TTB government warning.
 
-Built for TTB examiners and compliance teams who need a fast first pass before formal review. This is **not** an official TTB determination.
+Built for TTB examiners and compliance teams who need a fast first pass before formal review. **This is not an official TTB determination.**
 
-## Setup
+## Quick Demo
+**Live Application**: [https://ttblabel-ten.vercel.app/](https://ttblabel-ten.vercel.app/)
 
-```bash
-bun install
-cp .env.example .env.local
-```
+**Demo Credentials** (no real data stored):
+- Email: `Label-Scanner@demo.com`
+- Password: `Label-Scanner`
 
-Add your Anthropic API key to `.env.local`:
+Or register your own account.
 
-```
-ANTHROPIC_API_KEY=sk-ant-.
-```
+This is based on the requirements on this Link: https://github.com/treasurytakehome-rgb/instructions.git
 
-Database and auth variables are already configured in `.env.example` — copy them as-is if setting up a fresh environment.
 
-Start the dev server:
+## Test Samples
+Test images and sample COLA data are available in the `/tests` folder:
+- `/tests` — Individual label images for different test scenarios
+- cola_test_data' Excel file with expected values and test cases
 
-```bash
-bun dev
-```
+## Submission Notes for Treasury
+- **Repo**: https://github.com/hotwaniv/ttblabel
+- **Deployed URL**: https://ttblabel-ten.vercel.app/
+- Demo credentials provided above
+- All images processed in-memory only (no persistence)
+- Meets <5s response target on good-quality single labels
 
-Open [http://localhost:3000](http://localhost:3000), register or sign in, and use the verification form.
-
-### Docker (single command)
-
-Ensure `.env.local` contains at least `AUTH_SECRET` and `ANTHROPIC_API_KEY` (see `.env.example`). Postgres credentials are provisioned by Compose.
-
-```bash
-docker compose up --build
-```
-
-The app container runs database migrations on startup, then serves on [http://localhost:3000](http://localhost:3000).
+## Known Limitations & Trade-offs
+- UI can be significantly improved for even simpler use by.
+- Accuracy of vision extraction depends on image quality (curved, low-light, or low-resolution labels may need multiple attempts).
+- Large batches (hundreds of images) will be slower and more expensive — further optimization (caching, cheaper models, queuing) would be needed in production.
+- Limited real-world testing done so far — more validation against actual TTB labels would strengthen confidence.
 
 ## Architecture
 
@@ -149,68 +146,5 @@ Results export as **JSON only** — field statuses, extracted text, expected val
 - No image data is persisted on the server after verification completes.
 - Batch exports include a per-filename result array.
 
-## Known limitations
 
-- **Vision model dependency** — extraction quality depends on image resolution, lighting, curvature, and decorative typefaces. Small or embossed text may be misread.
-- **Not legally binding** — outputs are a compliance aid, not an official TTB label approval or rejection.
-- **Single application per batch** — batch mode applies the same expected values to every image in the ZIP; mixed-SKU archives need separate runs.
-- **API cost and latency** — each label requires a Claude Vision API call (~5–15 s per image). A 300-image batch can take several minutes even with concurrency.
-- **English labels only** — prompts and rules assume English-language TTB labels.
-- **No COLA database lookup** — the tool compares against user-entered values, not TTB registry records.
-- **Chat template remnants** — the repo retains unused chat/artifact code from the upstream Next.js template; only the verify routes and UI are active product surface.
 
-## Production deployment
-
-`ANTHROPIC_API_KEY` requires **outbound HTTPS access to `api.anthropic.com`**. Government network environments must allowlist this endpoint before deployment.
-
-Run database migrations before first deploy:
-
-```bash
-bun run db:migrate
-```
-
-## Project structure
-
-TTB verification–relevant files:
-
-```
-app/
-├── (auth)/                    # Login, register, NextAuth routes
-├── (chat)/page.tsx            # Main verify UI (single + batch tabs)
-└── api/
-    ├── prefill/route.ts       # POST — auto-fill form from label image
-    └── verify/
-        ├── route.ts           # POST — single image (JSON or SSE stream)
-        ├── batch/route.ts     # POST — ZIP batch verification
-        └── schema.ts          # Multipart form validation (Zod)
-
-components/verify/
-├── verify-form.tsx            # Two-panel single-image UI + pre-fill + SSE
-├── batch-form.tsx             # ZIP upload + batch progress/results
-├── verification-results.tsx   # Streaming field cards + rejection draft
-├── status-badge.tsx           # pass / warn / fail / absent / review badges
-└── user-nav.tsx               # Signed-in user + sign out
-
-lib/verify/
-├── types.ts                   # Zod schemas, VerificationResult types
-├── government-warning.ts      # Hardcoded TTB Surgeon General statement
-├── prompts.ts                 # Claude extraction + rejection letter prompts
-├── provider.ts                # Anthropic client → claude-sonnet-4-6
-├── prefill-label.ts           # Vision pre-fill for application fields
-├── sse-client.ts              # Browser SSE parser for /api/verify
-├── scoring.ts                 # PASS / FAIL / REVIEW aggregation
-├── merge-results.ts           # Merge AI output with expected values
-├── fuzzy-match.ts             # Levenshtein similarity helpers
-├── image.ts                   # sharp resize/format normalization
-├── verify-label.ts            # Full verification pipeline + stream callback
-└── batch.ts                   # ZIP extraction + concurrent queue (limit 5)
-
-Dockerfile                     # Production image (migrate on start)
-docker-compose.yml             # App + Postgres single-command deploy
-```
-
-Legacy chat template code (`app/(chat)/api/chat/`, `components/chat/`, `lib/ai/`) remains in the repo but is not part of the TTB verification product.
-
-## License
-
-See [LICENSE](LICENSE).
