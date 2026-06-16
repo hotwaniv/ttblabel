@@ -8,7 +8,7 @@ Built for TTB examiners and compliance teams who need a fast first pass before f
 **Live Application**: [https://ttblabel-ten.vercel.app/](https://ttblabel-ten.vercel.app/)
 
 **Demo Credentials** (no real data stored):
-- Email: `Label-Scanner@demo.com`
+- Email: `Label-Scanner`
 - Password: `Label-Scanner`
 
 Or register your own account.
